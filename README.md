@@ -16,6 +16,7 @@ extensions/
   crawl4ai-search.ts    Local Crawl4AI web search and scraping tools
   diff.ts               Diff display helper
   flow-title.ts         Session/title helper
+  learn-anything.ts     /learn and /learn-codebase commands for learning workflows
   obsidian-brain.ts     Durable Obsidian wiki memory tools
   opencode-zen-login.ts OpenCode Zen login helper
   tps-tracker.ts        Tokens-per-second status tracker
@@ -36,6 +37,17 @@ Secrets and machine-local runtime state are **not** committed:
 - `node_modules/`
 - session logs
 - provider tokens or API keys
+
+## Learning commands
+
+This setup includes a small `learn-anything.ts` extension that routes learning requests into the Understand-Anything workflow when those skills are installed.
+
+```text
+/learn <topic, repo, folder, or concept>
+/learn-codebase [path]
+```
+
+Use it when you want Pi to teach you a codebase, architecture, domain model, or knowledge base instead of just making edits.
 
 ## Install / restore
 
