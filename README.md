@@ -11,6 +11,8 @@ extensions/
   agentmemory/          Cross-session memory tools backed by a local agentmemory server
   contextia/            Contextro/Contextia codebase indexing and semantic search tools
   subagents/            Scout/researcher/reviewer/worker subagent orchestration
+  code-improve/         /code-improve and /code-review commands — deep multi-axis code quality review
+                        dispatching sub-agents (Architect, Reviewer, Minimalist, Security)
   codegraph.ts          @colbymchenry/codegraph integration tools
   copy-all.ts           Copy/export helper command
   crawl4ai-search.ts    Local Crawl4AI web search and scraping tools
@@ -19,6 +21,7 @@ extensions/
   learn-anything.ts     /learn and /learn-codebase commands for learning workflows
   obsidian-brain.ts     Durable Obsidian wiki memory tools
   opencode-zen-login.ts OpenCode Zen login helper
+  design-polish/        /design-polish command, skill, audit helpers, and Remotion video templates
   tps-tracker.ts        Tokens-per-second status tracker
   usage.ts              Usage/cost analysis helper
   yeet.ts               Fast command/helper extension
@@ -37,6 +40,34 @@ Secrets and machine-local runtime state are **not** committed:
 - `node_modules/`
 - session logs
 - provider tokens or API keys
+
+## Code quality commands
+
+This setup includes a `code-improve` extension that runs deep multi-axis code quality review.
+It combines candid-review methodology with ambitious structural improvement
+(code judo, anti-spaghetti, 1k-line boundary) and dispatches specialized sub-agents
+in parallel for a complete audit.
+
+```text
+/code-improve [path] [options]
+/code-review  (shorthand alias)
+```
+
+Options:
+
+- `--harsh` / `--constructive` — tone control
+- `--focus security|performance|architecture|edge-case` — narrow the review
+- `--auto-commit` — auto-commit fixes after user selects them
+- `--exclude <pattern>` — skip matching files
+
+**Sub-agents dispatched (parallel):**
+
+| Agent | Focus |
+|-------|-------|
+| 👁️ Code Reviewer | Correctness, security, maintainability, performance |
+| 🏛️ Software Architect | Structure, boundaries, code judo, anti-spaghetti, 1k-line gate |
+| 🪡 Minimal Change Engineer | Scope discipline, diff size, no premature abstraction |
+| 🔒 Security Engineer | Auto-dispatched when auth/data changes |
 
 ## Learning commands
 
@@ -75,6 +106,13 @@ After installing, restart Pi or run:
 /reload
 ```
 
+The `design-polish` extension also has its own local package for Remotion-based video mode. If you want video rendering available after install, run:
+
+```bash
+cd ~/.pi/agent/extensions/design-polish
+bun install
+```
+
 ## How Pi discovers these files
 
 Pi auto-discovers global extensions from:
@@ -104,4 +142,6 @@ Review the diff before committing so secrets or local state never get added.
 
 ## License
 
-Personal setup repository. Treat as reference unless a license is added.
+This repository is licensed under the [MIT License](./LICENSE).
+
+You can use, copy, modify, and share this setup, but it is provided as-is with no warranty. Third-party tools, package names, trademarks, and services referenced by these extensions remain under their own licenses and terms.
