@@ -8,6 +8,8 @@ This repo snapshots the custom Pi extensions and themes I use across projects so
 
 ```text
 extensions/
+  agentyc-mcp/          MCP bridge for agentyc browser automation (66 tools: navigate, click,
+                        type, extract, screenshots). Auto-connects on startup. `/agentyc` to status.
   agentmemory/          Cross-session memory tools backed by a local agentmemory server
   contextia/            Contextro/Contextia codebase indexing and semantic search tools
   subagents/            Scout/researcher/reviewer/worker subagent orchestration
@@ -40,6 +42,20 @@ Secrets and machine-local runtime state are **not** committed:
 - `node_modules/`
 - session logs
 - provider tokens or API keys
+
+## Browser automation (agentyc MCP)
+
+This setup includes an MCP bridge extension that spawns `agentyc mcp` as a child process,
+discovers all 66 tools via the Model Context Protocol, and registers them with Pi's tool
+system so the LLM can call them directly.
+
+**Commands:**
+- `/agentyc` — show connection status and tool list
+- `/agentyc restart` — restart the MCP server
+
+**Prerequisite:** `uv tool install agentyc` (or `pip install agentyc`)
+
+**Install dependencies:** `cd ~/.pi/agent/extensions/agentyc-mcp && bun install`
 
 ## Code quality commands
 
