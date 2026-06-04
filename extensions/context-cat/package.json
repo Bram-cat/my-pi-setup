@@ -1,0 +1,16 @@
+{
+  "name": "context-cat-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "tsc --noEmit --moduleResolution bundler --module esnext --target es2022 --types node --skipLibCheck index.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-tui": "latest"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "typescript": "^6.0.3"
+  }
+}
