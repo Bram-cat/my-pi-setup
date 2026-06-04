@@ -59,6 +59,21 @@ const CONTEXT_SIGNAL_WORDS = [
   "output",
   "next",
   "blocker",
+  "done",
+  "todo",
+  "verify",
+  "source",
+  "commit",
+];
+const AMBIGUITY_WORDS = ["maybe", "probably", "might", "could", "seems", "appears", "unclear", "somehow", "whatever"];
+const DISTRACTOR_PATTERNS = [
+  "ignore previous",
+  "unrelated",
+  "by the way",
+  "for later",
+  "not relevant",
+  "side note",
+  "random",
 ];
 
 const palette = {
@@ -583,8 +598,20 @@ function classifyContextBucket(entries: unknown[]) {
 function classifyEntry(entry: unknown) {
   const text = safeStringify(entry);
   const lower = text.toLowerCase();
-  const userText = extractUserMessageText(entry);
+  const risk = contextRotRiskScore(entry, text, lower);
 
+  if (risk >= 100) return "!";
+  if (risk >= 35) return "~";
+  return "=";
+}
+
+function contextRotRiskScore(entry: unknown, text = safeStringify(entry), lower = text.toLowerCase()) {
+  let score = 0;
+  const userText = extractUserMessageText(entry);
+  const clean = normalizeContextText(userText || text);
+  const words = clean.split(/\s+/).filter(Boolean);
+
+  // Red: hard failures or huge single entries. These pollute attention and should be reread selectively.
   if (
     lower.includes('"iserror":true') ||
     lower.includes('"exitcode":1') ||
@@ -596,11 +623,15 @@ function classifyEntry(entry: unknown) {
     lower.includes("syntaxerror") ||
     lower.includes("typeerror") ||
     text.length > 30_000
-  ) return "!";
+  ) return 100;
 
+  // Chroma context-rot lesson: length alone creates degradation; irrelevant/distracting text compounds it.
+  if (text.length > 8_000) score += 45;
+  else if (text.length > 4_000) score += 24;
+  else if (text.length > 1_500) score += 10;
+
+  // Tool-result noise: useful short-term, usually not worth keeping raw deep in history.
   if (
-    text.length > 8_000 ||
-    isLowSignalUserContext(userText) ||
     lower.includes('"stderr"') ||
     lower.includes('"stdout"') ||
     lower.includes("diff --git") ||
@@ -609,9 +640,31 @@ function classifyEntry(entry: unknown) {
     lower.includes("cargo build") ||
     lower.includes("npm install") ||
     lower.includes("bun install")
-  ) return "~";
+  ) score += 35;
 
-  return "=";
+  const signalHits = CONTEXT_SIGNAL_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const fillerHits = FILLER_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const ambiguityHits = AMBIGUITY_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const distractorHits = DISTRACTOR_PATTERNS.reduce((hits, phrase) => hits + countPhrase(clean, phrase), 0);
+  const repetitionRatio = repeatedWordRatio(words);
+
+  // Good context is focused: goal/spec/decision/file/test/expected/actual/next. Lack of anchors raises risk.
+  if (words.length >= 35 && signalHits === 0) score += 18;
+  if (words.length >= 70 && signalHits <= 1) score += 12;
+
+  // User prose can be context pressure when it is hedged, vague, or filler-heavy.
+  if (userText) {
+    const fillerDensity = fillerHits / Math.max(words.length, 1);
+    if (fillerHits >= 6 || fillerDensity >= 0.08) score += 28;
+    if (ambiguityHits >= 3) score += 14;
+    if (clean.includes("?") && signalHits === 0 && words.length > 70) score += 18;
+  }
+
+  // Research-inspired distractor/repetition risk: similar-looking or repeated material makes retrieval less reliable.
+  if (distractorHits > 0) score += 22;
+  if (repetitionRatio >= 0.28 && words.length >= 80) score += 20;
+
+  return score;
 }
 
 function extractUserMessageText(entry: unknown) {
@@ -623,19 +676,15 @@ function extractUserMessageText(entry: unknown) {
   return extractEntryText(entry);
 }
 
-function isLowSignalUserContext(text: string) {
-  const clean = text.toLowerCase().replace(/[^a-z0-9\s?./_-]/g, " ").replace(/\s+/g, " ").trim();
-  if (clean.length < 180) return false;
+function normalizeContextText(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9\s?./_-]/g, " ").replace(/\s+/g, " ").trim();
+}
 
-  const words = clean.split(/\s+/).filter(Boolean);
-  if (words.length < 35) return false;
-
-  const fillerHits = FILLER_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
-  const signalHits = CONTEXT_SIGNAL_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
-  const questionOnly = clean.includes("?") && signalHits === 0;
-  const fillerDensity = fillerHits / Math.max(words.length, 1);
-
-  return fillerHits >= 6 || fillerDensity >= 0.08 || (questionOnly && words.length > 70);
+function repeatedWordRatio(words: string[]) {
+  if (!words.length) return 0;
+  const counts = new Map<string, number>();
+  for (const word of words) counts.set(word, (counts.get(word) ?? 0) + 1);
+  return Math.max(...counts.values()) / words.length;
 }
 
 function countPhrase(text: string, phrase: string) {

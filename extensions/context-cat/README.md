@@ -13,13 +13,13 @@ Context Cat shows a small cat above the editor, tracks current context usage, pa
 
 ## Behavior
 
-Context Cat follows a simple context-engineering model inspired by common coding-agent practice: keep compact goals, decisions, constraints, files, tests, and next actions; mark bulky logs, diffs, vague prose, and failures as context pressure.
+Context Cat follows a simple context-engineering model informed by Anthropic's context-engineering guidance, Martin Fowler's coding-agent context primer, and Chroma's context-rot findings: keep the smallest high-signal context; treat length, ambiguity, distractors, repeated text, raw tool output, and errors as attention pressure.
 
-- Green cells: compact useful context with enough signal to keep
-- Yellow cells: bulky/noisy context such as long stdout, diffs, installs, large tool output, or filler-heavy user text
-- Red cells: stack traces, failed extension loads, hard errors, or oversized context entries
+- Green cells: compact useful context with task anchors such as goals, decisions, constraints, files, tests, expected/actual behavior, verification, and next actions
+- Yellow cells: context-rot risk: long entries, raw stdout/stderr, diffs, installs, repeated text, distractor/side-note patterns, weak task anchors, or filler-heavy user text
+- Red cells: stack traces, failed extension loads, hard errors, or oversized context entries that should be reread selectively instead of carried raw
 
-Low-signal user text is yellow, not red. It is detected from a standard feature set: filler/hedging words (`just`, `basically`, `maybe`, `probably`, `stuff`, `things`, etc.), weak signal density, and missing task anchors like `goal`, `spec`, `decision`, `file`, `test`, `expected`, `actual`, or `next`.
+Low-signal user text is yellow, not red. It is scored from a standard feature set: filler/hedging words (`just`, `basically`, `maybe`, `probably`, `stuff`, `things`, etc.), ambiguity, weak signal density, repetition, distractor phrases, and missing task anchors like `goal`, `spec`, `decision`, `file`, `test`, `expected`, `actual`, or `next`.
 
 Auto-handoff triggers near high context usage or when red/noisy zones accumulate.
 

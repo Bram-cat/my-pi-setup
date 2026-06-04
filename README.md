@@ -62,9 +62,9 @@ system so the LLM can call them directly.
 
 This setup includes `context-cat`, an animated Pi widget that watches context usage,
 shows green/yellow/red heatmap cells for compact/noisy/bad context, and can start a
-handoff session before the window gets too risky. The heatmap uses a standard feature
-set: compact task anchors are good; logs, diffs, errors, oversized entries, and
-filler-heavy user text become noisy/bad context pressure.
+handoff session before the window gets too risky. The heatmap uses a research-informed
+feature set: compact task anchors are good; length, ambiguity, distractors, repetition,
+logs, diffs, errors, oversized entries, and filler-heavy user text become context pressure.
 
 ![Context Cat preview](./extensions/context-cat/assets/context-cat-preview.png)
 
