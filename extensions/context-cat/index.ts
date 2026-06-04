@@ -17,6 +17,49 @@ const LEGACY_WIDGET_ID = "pi-familiar";
 const CONTENT_WIDTH = 46;
 const FACE_WIDTH = 8;
 const HEATMAP_CELLS = 18;
+const FILLER_WORDS = [
+  "stuff",
+  "things",
+  "just",
+  "basically",
+  "simply",
+  "actually",
+  "really",
+  "very",
+  "quite",
+  "rather",
+  "pretty much",
+  "kind of",
+  "sort of",
+  "maybe",
+  "probably",
+  "might",
+  "could",
+  "seems like",
+  "looks like",
+  "i think",
+  "i believe",
+];
+const CONTEXT_SIGNAL_WORDS = [
+  "goal",
+  "spec",
+  "requirement",
+  "acceptance criteria",
+  "decision",
+  "constraint",
+  "tradeoff",
+  "error",
+  "reproduce",
+  "expected",
+  "actual",
+  "file",
+  "path",
+  "test",
+  "command",
+  "output",
+  "next",
+  "blocker",
+];
 
 const palette = {
   fur: "muted",
@@ -540,6 +583,7 @@ function classifyContextBucket(entries: unknown[]) {
 function classifyEntry(entry: unknown) {
   const text = safeStringify(entry);
   const lower = text.toLowerCase();
+  const userText = extractUserMessageText(entry);
 
   if (
     lower.includes('"iserror":true') ||
@@ -556,6 +600,7 @@ function classifyEntry(entry: unknown) {
 
   if (
     text.length > 8_000 ||
+    isLowSignalUserContext(userText) ||
     lower.includes('"stderr"') ||
     lower.includes('"stdout"') ||
     lower.includes("diff --git") ||
@@ -567,6 +612,35 @@ function classifyEntry(entry: unknown) {
   ) return "~";
 
   return "=";
+}
+
+function extractUserMessageText(entry: unknown) {
+  if (!entry || typeof entry !== "object") return "";
+  const record = entry as Record<string, unknown>;
+  if (record.type !== "message") return "";
+  const message = record.message as Record<string, unknown> | undefined;
+  if (!message || message.role !== "user") return "";
+  return extractEntryText(entry);
+}
+
+function isLowSignalUserContext(text: string) {
+  const clean = text.toLowerCase().replace(/[^a-z0-9\s?./_-]/g, " ").replace(/\s+/g, " ").trim();
+  if (clean.length < 180) return false;
+
+  const words = clean.split(/\s+/).filter(Boolean);
+  if (words.length < 35) return false;
+
+  const fillerHits = FILLER_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const signalHits = CONTEXT_SIGNAL_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const questionOnly = clean.includes("?") && signalHits === 0;
+  const fillerDensity = fillerHits / Math.max(words.length, 1);
+
+  return fillerHits >= 6 || fillerDensity >= 0.08 || (questionOnly && words.length > 70);
+}
+
+function countPhrase(text: string, phrase: string) {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.match(new RegExp(`\\b${escaped}\\b`, "g"))?.length ?? 0;
 }
 
 function countChars(text: string, char: string) {
