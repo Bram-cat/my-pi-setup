@@ -1,4 +1,6 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { getMarkdownTheme } from "@earendil-works/pi-coding-agent";
+import { Box, Markdown } from "@earendil-works/pi-tui";
 
 type Mood = "idle" | "thinking" | "success" | "warn";
 type Theme = { fg: (color: never, text: string) => string };
@@ -92,6 +94,12 @@ const palette = {
 };
 
 export default function piFamiliar(pi: ExtensionAPI) {
+  pi.registerMessageRenderer("context-cat-explain", (message, _options, theme) => {
+    const box = new Box(1, 1, (text) => theme.bg("customMessageBg", text));
+    box.addChild(new Markdown(String(message.content ?? ""), 0, 0, getMarkdownTheme()));
+    return box;
+  });
+
   let timer: NodeJS.Timeout | undefined;
   let commandCtx: ExtensionCommandContext | undefined;
   let autoHandoffRunning = false;
@@ -206,8 +214,12 @@ export default function piFamiliar(pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       commandCtx = ctx;
       updateContext(ctx);
-      ctx.ui.setEditorText(buildContextCatExplanation(state.contextPct, ctx.sessionManager.getBranch()));
-      ctx.ui.notify("Context Cat explanation written to editor.", "info");
+      pi.sendMessage({
+        customType: "context-cat-explain",
+        content: buildContextCatExplanation(state.contextPct, ctx.sessionManager.getBranch()),
+        display: true,
+      });
+      ctx.ui.notify("Context Cat explanation shown in transcript.", "info");
     },
   });
 
@@ -373,7 +385,7 @@ function buildFamiliarHandoffPrompt(
   const contextEntries = branch.filter(isContextBearingEntry);
   const recent = contextEntries.slice(-24);
   const files = extractPaths(contextEntries).slice(0, 24);
-  const cleaned = recent.map(extractEntryText).filter(Boolean).map(cleanHandoffText).map(compressHandoffText);
+  const cleaned = recent.map(extractEntryText).filter(Boolean).map(cleanHandoffText);
   const facts = unique(cleaned.filter(isLikelyFact).slice(-8));
   const assumptions = unique(cleaned.filter(isLikelyAssumption).slice(-6));
   const openQuestions = unique(cleaned.filter(isLikelyOpenQuestion).slice(-6));
@@ -435,19 +447,17 @@ function buildFamiliarHandoffPrompt(
 
 function cleanHandoffText(text: string) {
   const replacements: Array<[RegExp, string | ((match: string) => string)]> = [
-    [/\b(stuff|things?)\b/gi, "specific items"],
+    [/\b(stuff|things?)\b/gi, "items"],
     [/\b(just|basically|simply|obviously|clearly|actually|really|very|quite|rather|pretty much|kind of|sort of)\b/gi, ""],
     [/\b(in order to|due to the fact that|at this point in time|for the purpose of)\b/gi, (match: string) => phraseReplacement(match)],
-    [/\b(maybe|probably|might|could|seems like|looks like|appears to|I think|I believe)\b/gi, "VERIFY:"],
-    [/\b(fix(ed)?|done|works|working)\b/gi, "VERIFY outcome"],
-    [/\b(successfully)\b/gi, "reported success"],
+    [/\b(maybe|probably|might|could|seems like|looks like|appears to|I think|I believe)\b/gi, "possibly"],
   ];
 
   let cleaned = text;
   for (const [pattern, replacement] of replacements) {
     cleaned = typeof replacement === "string" ? cleaned.replace(pattern, replacement) : cleaned.replace(pattern, replacement);
   }
-  return cleaned.replace(/\s+/g, " ").replace(/VERIFY:\s*VERIFY:/g, "VERIFY:").trim();
+  return cleaned.replace(/\s+/g, " ").trim();
 }
 
 function phraseReplacement(match: string) {
@@ -458,15 +468,6 @@ function phraseReplacement(match: string) {
     "for the purpose of": "for",
   };
   return replacements[match.toLowerCase()] ?? match;
-}
-
-function compressHandoffText(text: string) {
-  return text
-    .replace(/\b(the|a|an)\s+(?=(user|repo|file|command|extension|widget|handoff|context|error|preference)\b)/gi, "")
-    .replace(/\bthat\s+(?=(the|a|an|user|repo|file|command|extension|widget|handoff|context)\b)/gi, "")
-    .replace(/\bplease\b/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function isLikelyFact(text: string) {
@@ -529,7 +530,7 @@ function inferNextActions(cleaned: string[], files: string[], foggyPreferenceQue
   const actions = [
     "1. Re-read source files before editing; do not trust summarized code snippets.",
     foggyPreferenceQuestions.length
-      ? "2. Before acting on preferences, ask Grill-me clarification queue above (strictly max 5 questions)."
+      ? "2. Ask the clarification queue only for choices still blocking the next edit."
       : latestIntent ? `2. Continue latest user intent: ${clip(latestIntent, 170)}` : "2. Ask user for current goal if latest intent unclear.",
     files[0] ? `3. Start with ${files[0]}; verify behavior with repo check command after changes.` : "3. Identify target files, then run narrowest available check command.",
     "4. Treat assumptions and noisy/error evidence above as leads, not facts.",
@@ -626,7 +627,8 @@ function buildHeatmapCells(pct: number, entries: unknown[]) {
     const bucket = contextEntries.slice(start, end);
     const analyses = bucket.map(analyzeEntryRisk);
     const score = Math.max(0, ...analyses.map((analysis) => analysis.score));
-    const mark = score >= 100 ? "!" : score >= 35 ? "~" : "=";
+    const hasHardFailure = analyses.some((analysis) => analysis.hardFailure);
+    const mark = hasHardFailure || score >= 100 ? "!" : score >= 35 ? "~" : "=";
     const reasons = unique(analyses.flatMap((analysis) => analysis.reasons));
     const dimensions = mergeDimensions(analyses.map((analysis) => analysis.dimensions));
     return { index, mark, score, entries: bucket.length, reasons, dimensions };
@@ -635,7 +637,9 @@ function buildHeatmapCells(pct: number, entries: unknown[]) {
 
 function isContextBearingEntry(entry: unknown) {
   if (!entry || typeof entry !== "object") return true;
-  const type = (entry as { type?: unknown }).type;
+  const record = entry as { type?: unknown; customType?: unknown };
+  if (record.customType === "context-cat-explain") return false;
+  const type = record.type;
   return type === "message" || type === "custom_message" || type === "compaction" || type === "branch_summary";
 }
 
@@ -670,17 +674,17 @@ function analyzeEntryRisk(entry: unknown) {
     ['"iserror":true', "tool error flag"],
     ['"exitcode":1', "exit code 1"],
     ['"exit_code":1', "exit code 1"],
-    ["stack trace", "stack trace"],
     ["traceback (most recent call last)", "python traceback"],
     ["uncaught exception", "uncaught exception"],
     ["failed to load extension", "failed extension load"],
-    ["syntaxerror", "syntax error"],
-    ["typeerror", "type error"],
   ];
   const hardReason = hardFailures.find(([needle]) => lower.includes(needle))?.[1];
   if (hardReason || text.length > 30_000) {
-    return { score: 100, reasons: [hardReason ?? "huge entry >30k chars"], dimensions };
+    return { score: 100, reasons: [hardReason ?? "huge entry >30k chars"], dimensions, hardFailure: true };
   }
+
+  const quotedErrorTerms = ["stack trace", "syntaxerror", "typeerror"];
+  if (quotedErrorTerms.some((needle) => lower.includes(needle))) addRisk(35, "quoted error/debug evidence");
 
   // Chroma context-rot lesson: length alone creates degradation; irrelevant/distracting text compounds it.
   if (text.length > 8_000) addRisk(45, "long entry >8k chars");
@@ -726,7 +730,7 @@ function analyzeEntryRisk(entry: unknown) {
   if (distractorHits > 0) addRisk(22, "distractor/side-note phrase");
   if (repetitionRatio >= 0.28 && words.length >= 80) addRisk(20, "high repetition");
 
-  return { score, reasons, dimensions };
+  return { score: Math.min(score, 95), reasons, dimensions, hardFailure: false };
 
   function addRisk(points: number, reason: string) {
     score += points;
@@ -776,7 +780,7 @@ function understandingRisk(dimensions: ReturnType<typeof analyzeUnderstandingDim
   if (dimensions.output === 0 && wordCount >= 50) risk += 8;
   if (dimensions.ambiguity >= 3) risk += 10;
   if (dimensions.distractors > 0) risk += 14;
-  if (dimensions.contradiction) risk += 100;
+  if (dimensions.contradiction) risk += 55;
   return risk;
 }
 

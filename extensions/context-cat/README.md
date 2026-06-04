@@ -4,7 +4,7 @@
 
 Animated Pi context-window companion widget.
 
-Context Cat shows a small cat above the editor, tracks current context usage, paints a compact heatmap of useful/noisy/bad context, and can create a handoff session when the context window gets risky.
+Context Cat shows a small cat above the editor, tracks current context usage, paints a compact heatmap of useful/noisy/bad context, and can create a lightly cleaned handoff session when the context window gets risky.
 
 ## Commands
 
@@ -24,7 +24,7 @@ Low-signal user text is yellow, not red. It is scored from an NLU/RAG-inspired f
 
 `/context-cat-explain` shows these dimensions per heatmap cell so users can see whether a cell is noisy because of raw logs, vague intent, missing slots, absent evidence rules, weak output format, or hard errors.
 
-Auto-handoff triggers near high context usage or when red/noisy zones accumulate.
+Auto-handoff triggers near high context usage or when red/noisy zones accumulate. Handoff text uses light cleanup only: whitespace normalization, filler trimming, and cautious wording for uncertainty without aggressive semantic compression.
 
 ## Install dependencies
 
