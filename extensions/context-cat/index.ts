@@ -65,6 +65,10 @@ const CONTEXT_SIGNAL_WORDS = [
   "source",
   "commit",
 ];
+const INTENT_WORDS = ["summarize", "compare", "extract", "classify", "calculate", "rewrite", "create", "debug", "fix", "implement", "review", "explain", "research", "generate", "edit"];
+const SLOT_WORDS = ["for", "audience", "length", "format", "include", "exclude", "deadline", "language", "tone", "file", "path", "repo", "branch", "error", "expected", "actual"];
+const EVIDENCE_WORDS = ["use only", "cite", "source", "quote", "grounded", "evidence", "do not guess", "not stated", "verify", "check"];
+const OUTPUT_WORDS = ["json", "table", "markdown", "bullet", "list", "diff", "patch", "summary", "report", "2-3", "short", "format"];
 const AMBIGUITY_WORDS = ["maybe", "probably", "might", "could", "seems", "appears", "unclear", "somehow", "whatever"];
 const DISTRACTOR_PATTERNS = [
   "ignore previous",
@@ -580,7 +584,8 @@ function buildContextCatExplanation(pct: number, entries: unknown[]) {
   const used = cells.filter((cell) => cell.mark !== ".");
   const rows = used.map((cell) => {
     const reasons = cell.reasons.length ? cell.reasons.slice(0, 4).join("; ") : "compact signal / no risk markers";
-    return `| ${cell.index + 1} | ${cell.mark} | ${cell.score} | ${cell.entries} | ${reasons} |`;
+    const dimensions = cell.dimensions ? formatDimensionSummary(cell.dimensions) : "unused";
+    return `| ${cell.index + 1} | ${cell.mark} | ${cell.score} | ${dimensions} | ${cell.entries} | ${reasons} |`;
   });
 
   return [
@@ -591,14 +596,14 @@ function buildContextCatExplanation(pct: number, entries: unknown[]) {
     "",
     "Legend: `=` good signal, `~` noisy/context-rot pressure, `!` hard error/toxic context, `.` unused window.",
     "",
-    "| Cell | Mark | Risk | Entries | Why |",
-    "|---:|:---:|---:|---:|---|",
-    rows.length ? rows.join("\n") : "| - | . | 0 | 0 | no used context cells |",
+    "| Cell | Mark | Risk | Dimensions | Entries | Why |",
+    "|---:|:---:|---:|---|---:|---|",
+    rows.length ? rows.join("\n") : "| - | . | 0 | - | 0 | no used context cells |",
     "",
     "## Scoring model",
-    "Good context has compact task anchors: goal/spec/decision/constraint/file/test/expected/actual/next/verify.",
-    "Yellow context has attention pressure: length, raw stdout/stderr, diffs, install/build logs, filler, ambiguity, distractors, repetition.",
-    "Red context has hard failures: tool errors, exit code 1, stack traces, tracebacks, syntax/type errors, failed extension loads, or huge entries.",
+    "Good context is not good words; it is useful structure: clear intent, captured slots/constraints, relevant evidence boundary, output format, and success/verification criteria.",
+    "Yellow context has understanding risk: vague intent, missing slots, low context precision, weak recall, hallucination risk, contradictions, length, raw logs/diffs, ambiguity, distractors, or repetition.",
+    "Red context has hard failures or impossible/toxic context: tool errors, exit code 1, stack traces, tracebacks, syntax/type errors, failed extension loads, contradictions, or huge entries.",
     "",
     "## Suggested fix",
     used.some((cell) => cell.mark === "!")
@@ -623,7 +628,8 @@ function buildHeatmapCells(pct: number, entries: unknown[]) {
     const score = Math.max(0, ...analyses.map((analysis) => analysis.score));
     const mark = score >= 100 ? "!" : score >= 35 ? "~" : "=";
     const reasons = unique(analyses.flatMap((analysis) => analysis.reasons));
-    return { index, mark, score, entries: bucket.length, reasons };
+    const dimensions = mergeDimensions(analyses.map((analysis) => analysis.dimensions));
+    return { index, mark, score, entries: bucket.length, reasons, dimensions };
   });
 }
 
@@ -658,6 +664,7 @@ function analyzeEntryRisk(entry: unknown) {
   const userText = extractUserMessageText(entry);
   const clean = normalizeContextText(userText || text);
   const words = clean.split(/\s+/).filter(Boolean);
+  const dimensions = analyzeUnderstandingDimensions(clean, words, userText);
 
   const hardFailures = [
     ['"iserror":true', "tool error flag"],
@@ -672,7 +679,7 @@ function analyzeEntryRisk(entry: unknown) {
   ];
   const hardReason = hardFailures.find(([needle]) => lower.includes(needle))?.[1];
   if (hardReason || text.length > 30_000) {
-    return { score: 100, reasons: [hardReason ?? "huge entry >30k chars"] };
+    return { score: 100, reasons: [hardReason ?? "huge entry >30k chars"], dimensions };
   }
 
   // Chroma context-rot lesson: length alone creates degradation; irrelevant/distracting text compounds it.
@@ -693,6 +700,11 @@ function analyzeEntryRisk(entry: unknown) {
   ) addRisk(35, "raw tool/log/diff/install output");
 
   const signalHits = CONTEXT_SIGNAL_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const structureRisk = understandingRisk(dimensions, words.length);
+  if (structureRisk >= 100) addRisk(structureRisk, "contradictory/impossible prompt structure");
+  else if (structureRisk >= 40) addRisk(structureRisk, "weak prompt-understanding structure");
+  else if (structureRisk >= 20) addRisk(structureRisk, "partial prompt-understanding structure");
+
   const fillerHits = FILLER_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
   const ambiguityHits = AMBIGUITY_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
   const distractorHits = DISTRACTOR_PATTERNS.reduce((hits, phrase) => hits + countPhrase(clean, phrase), 0);
@@ -714,7 +726,7 @@ function analyzeEntryRisk(entry: unknown) {
   if (distractorHits > 0) addRisk(22, "distractor/side-note phrase");
   if (repetitionRatio >= 0.28 && words.length >= 80) addRisk(20, "high repetition");
 
-  return { score, reasons };
+  return { score, reasons, dimensions };
 
   function addRisk(points: number, reason: string) {
     score += points;
@@ -729,6 +741,73 @@ function extractUserMessageText(entry: unknown) {
   const message = record.message as Record<string, unknown> | undefined;
   if (!message || message.role !== "user") return "";
   return extractEntryText(entry);
+}
+
+function analyzeUnderstandingDimensions(clean: string, words: string[], userText: string) {
+  const intent = INTENT_WORDS.some((word) => countPhrase(clean, word) > 0) || /^\s*(can you|please|i want|i need|make|do|tell|show)\b/i.test(userText);
+  const slots = SLOT_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const evidence = EVIDENCE_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const output = OUTPUT_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const constraints = CONTEXT_SIGNAL_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const ambiguity = AMBIGUITY_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
+  const distractors = DISTRACTOR_PATTERNS.reduce((hits, phrase) => hits + countPhrase(clean, phrase), 0);
+  const contradiction = hasContradiction(clean);
+
+  return {
+    intent,
+    slots: Math.min(slots, 3),
+    evidence: Math.min(evidence, 2),
+    output: Math.min(output, 2),
+    constraints: Math.min(constraints, 4),
+    ambiguity,
+    distractors,
+    contradiction,
+    longEnoughToJudge: words.length >= 25,
+  };
+}
+
+function understandingRisk(dimensions: ReturnType<typeof analyzeUnderstandingDimensions>, wordCount: number) {
+  if (!dimensions.longEnoughToJudge) return 0;
+  let risk = 0;
+  if (!dimensions.intent) risk += 18;
+  if (dimensions.slots === 0) risk += 14;
+  if (dimensions.constraints === 0) risk += 12;
+  if (dimensions.evidence === 0 && wordCount >= 80) risk += 8;
+  if (dimensions.output === 0 && wordCount >= 50) risk += 8;
+  if (dimensions.ambiguity >= 3) risk += 10;
+  if (dimensions.distractors > 0) risk += 14;
+  if (dimensions.contradiction) risk += 100;
+  return risk;
+}
+
+function formatDimensionSummary(dimensions: ReturnType<typeof mergeDimensions>) {
+  const parts = [
+    dimensions.intent ? "intent" : "no-intent",
+    dimensions.slots ? `slots:${dimensions.slots}` : "no-slots",
+    dimensions.evidence ? "evidence" : "no-evidence",
+    dimensions.output ? "output" : "no-output",
+  ];
+  if (dimensions.contradiction) parts.push("contradiction");
+  if (dimensions.ambiguity) parts.push(`amb:${dimensions.ambiguity}`);
+  return parts.join(", ");
+}
+
+function mergeDimensions(items: Array<ReturnType<typeof analyzeUnderstandingDimensions>>) {
+  return {
+    intent: items.some((item) => item.intent),
+    slots: Math.max(0, ...items.map((item) => item.slots)),
+    evidence: Math.max(0, ...items.map((item) => item.evidence)),
+    output: Math.max(0, ...items.map((item) => item.output)),
+    constraints: Math.max(0, ...items.map((item) => item.constraints)),
+    ambiguity: Math.max(0, ...items.map((item) => item.ambiguity)),
+    distractors: Math.max(0, ...items.map((item) => item.distractors)),
+    contradiction: items.some((item) => item.contradiction),
+    longEnoughToJudge: items.some((item) => item.longEnoughToJudge),
+  };
+}
+
+function hasContradiction(text: string) {
+  return /\b(detailed|comprehensive|thorough)\b.*\b(short|brief|concise)\b|\b(short|brief|concise)\b.*\b(detailed|comprehensive|thorough)\b|\buse only\b.*\b(use anything|outside knowledge|web)\b/i.test(text);
 }
 
 function normalizeContextText(text: string) {

@@ -20,7 +20,9 @@ Context Cat follows a simple context-engineering model informed by Anthropic's c
 - Yellow cells: context-rot risk: long entries, raw stdout/stderr, diffs, installs, repeated text, distractor/side-note patterns, weak task anchors, or filler-heavy user text
 - Red cells: stack traces, failed extension loads, hard errors, or oversized context entries that should be reread selectively instead of carried raw
 
-Low-signal user text is yellow, not red. It is scored from a standard feature set: filler/hedging words (`just`, `basically`, `maybe`, `probably`, `stuff`, `things`, etc.), ambiguity, weak signal density, repetition, distractor phrases, and missing task anchors like `goal`, `spec`, `decision`, `file`, `test`, `expected`, `actual`, or `next`.
+Low-signal user text is yellow, not red. It is scored from an NLU/RAG-inspired feature set: intent clarity, slot/constraint capture, context precision/recall proxies, evidence boundary, output format, faithfulness risk, filler/hedging words (`just`, `basically`, `maybe`, `probably`, `stuff`, `things`, etc.), ambiguity, repetition, distractor phrases, and missing task anchors like `goal`, `spec`, `decision`, `file`, `test`, `expected`, `actual`, or `next`.
+
+`/context-cat-explain` shows these dimensions per heatmap cell so users can see whether a cell is noisy because of raw logs, vague intent, missing slots, absent evidence rules, weak output format, or hard errors.
 
 Auto-handoff triggers near high context usage or when red/noisy zones accumulate.
 
