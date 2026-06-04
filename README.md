@@ -64,6 +64,8 @@ This setup includes `context-cat`, an animated Pi widget that watches context us
 shows green/yellow/red heatmap cells for compact/noisy/bad context, and can start a
 handoff session before the window gets too risky.
 
+![Context Cat preview](./extensions/context-cat/assets/context-cat-preview.png)
+
 ```text
 /context-cat
 /context-cat-handoff

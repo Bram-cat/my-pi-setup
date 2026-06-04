@@ -1,5 +1,7 @@
 # Context Cat
 
+![Context Cat preview](./assets/context-cat-preview.png)
+
 Animated Pi context-window companion widget.
 
 Context Cat shows a small cat above the editor, tracks current context usage, paints a compact heatmap of useful/noisy/bad context, and can create a handoff session when the context window gets risky.
