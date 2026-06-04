@@ -9,6 +9,7 @@ Context Cat shows a small cat above the editor, tracks current context usage, pa
 ## Commands
 
 - `/context-cat` — repaint/show the widget
+- `/context-cat-explain` — write a markdown explanation of each heatmap cell into the editor
 - `/context-cat-handoff` — open a compact Context Cat handoff session immediately
 
 ## Behavior

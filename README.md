@@ -70,6 +70,7 @@ logs, diffs, errors, oversized entries, and filler-heavy user text become contex
 
 ```text
 /context-cat
+/context-cat-explain
 /context-cat-handoff
 ```
 

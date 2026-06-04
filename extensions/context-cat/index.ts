@@ -197,6 +197,16 @@ export default function piFamiliar(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("context-cat-explain", {
+    description: "Explain why Context Cat marked heatmap cells green/yellow/red",
+    handler: async (_args, ctx) => {
+      commandCtx = ctx;
+      updateContext(ctx);
+      ctx.ui.setEditorText(buildContextCatExplanation(state.contextPct, ctx.sessionManager.getBranch()));
+      ctx.ui.notify("Context Cat explanation written to editor.", "info");
+    },
+  });
+
   async function maybeAutoHandoff(ctx: {
     isIdle?: () => boolean;
     sessionManager?: { getSessionId?: () => string; getBranch?: () => unknown[]; getSessionFile?: () => string | undefined };
@@ -562,21 +572,59 @@ function clip(text: string, max: number) {
 }
 
 function makeSessionHeatmap(pct: number, entries: unknown[]) {
+  return `[${buildHeatmapCells(pct, entries).map((cell) => cell.mark).join("")}]`;
+}
+
+function buildContextCatExplanation(pct: number, entries: unknown[]) {
+  const cells = buildHeatmapCells(pct, entries);
+  const used = cells.filter((cell) => cell.mark !== ".");
+  const rows = used.map((cell) => {
+    const reasons = cell.reasons.length ? cell.reasons.slice(0, 4).join("; ") : "compact signal / no risk markers";
+    return `| ${cell.index + 1} | ${cell.mark} | ${cell.score} | ${cell.entries} | ${reasons} |`;
+  });
+
+  return [
+    "# Context Cat Explain",
+    "",
+    `Context usage: ${pct}%`,
+    `Heatmap: [${cells.map((cell) => cell.mark).join("")}]`,
+    "",
+    "Legend: `=` good signal, `~` noisy/context-rot pressure, `!` hard error/toxic context, `.` unused window.",
+    "",
+    "| Cell | Mark | Risk | Entries | Why |",
+    "|---:|:---:|---:|---:|---|",
+    rows.length ? rows.join("\n") : "| - | . | 0 | 0 | no used context cells |",
+    "",
+    "## Scoring model",
+    "Good context has compact task anchors: goal/spec/decision/constraint/file/test/expected/actual/next/verify.",
+    "Yellow context has attention pressure: length, raw stdout/stderr, diffs, install/build logs, filler, ambiguity, distractors, repetition.",
+    "Red context has hard failures: tool errors, exit code 1, stack traces, tracebacks, syntax/type errors, failed extension loads, or huge entries.",
+    "",
+    "## Suggested fix",
+    used.some((cell) => cell.mark === "!")
+      ? "Summarize red cells into decisions/files/next actions, then re-read only source files needed."
+      : used.some((cell) => cell.mark === "~")
+        ? "Compress yellow cells by replacing raw logs/diffs/vague prose with a short verified summary."
+        : "Context looks healthy. Keep adding only task-relevant anchors.",
+    "",
+  ].join("\n");
+}
+
+function buildHeatmapCells(pct: number, entries: unknown[]) {
   const usedCells = Math.round((Math.max(0, Math.min(100, pct)) / 100) * HEATMAP_CELLS);
   const contextEntries = entries.filter(isContextBearingEntry);
 
-  let out = "";
-  for (let i = 0; i < HEATMAP_CELLS; i++) {
-    if (i >= usedCells) {
-      out += ".";
-      continue;
-    }
-
-    const start = Math.floor((i / Math.max(usedCells, 1)) * contextEntries.length);
-    const end = Math.max(start + 1, Math.floor(((i + 1) / Math.max(usedCells, 1)) * contextEntries.length));
-    out += classifyContextBucket(contextEntries.slice(start, end));
-  }
-  return `[${out}]`;
+  return Array.from({ length: HEATMAP_CELLS }, (_, index) => {
+    if (index >= usedCells) return { index, mark: ".", score: 0, entries: 0, reasons: [] as string[] };
+    const start = Math.floor((index / Math.max(usedCells, 1)) * contextEntries.length);
+    const end = Math.max(start + 1, Math.floor(((index + 1) / Math.max(usedCells, 1)) * contextEntries.length));
+    const bucket = contextEntries.slice(start, end);
+    const analyses = bucket.map(analyzeEntryRisk);
+    const score = Math.max(0, ...analyses.map((analysis) => analysis.score));
+    const mark = score >= 100 ? "!" : score >= 35 ? "~" : "=";
+    const reasons = unique(analyses.flatMap((analysis) => analysis.reasons));
+    return { index, mark, score, entries: bucket.length, reasons };
+  });
 }
 
 function isContextBearingEntry(entry: unknown) {
@@ -596,39 +644,41 @@ function classifyContextBucket(entries: unknown[]) {
 }
 
 function classifyEntry(entry: unknown) {
-  const text = safeStringify(entry);
-  const lower = text.toLowerCase();
-  const risk = contextRotRiskScore(entry, text, lower);
-
+  const risk = analyzeEntryRisk(entry).score;
   if (risk >= 100) return "!";
   if (risk >= 35) return "~";
   return "=";
 }
 
-function contextRotRiskScore(entry: unknown, text = safeStringify(entry), lower = text.toLowerCase()) {
+function analyzeEntryRisk(entry: unknown) {
+  const text = safeStringify(entry);
+  const lower = text.toLowerCase();
   let score = 0;
+  const reasons: string[] = [];
   const userText = extractUserMessageText(entry);
   const clean = normalizeContextText(userText || text);
   const words = clean.split(/\s+/).filter(Boolean);
 
-  // Red: hard failures or huge single entries. These pollute attention and should be reread selectively.
-  if (
-    lower.includes('"iserror":true') ||
-    lower.includes('"exitcode":1') ||
-    lower.includes('"exit_code":1') ||
-    lower.includes("stack trace") ||
-    lower.includes("traceback (most recent call last)") ||
-    lower.includes("uncaught exception") ||
-    lower.includes("failed to load extension") ||
-    lower.includes("syntaxerror") ||
-    lower.includes("typeerror") ||
-    text.length > 30_000
-  ) return 100;
+  const hardFailures = [
+    ['"iserror":true', "tool error flag"],
+    ['"exitcode":1', "exit code 1"],
+    ['"exit_code":1', "exit code 1"],
+    ["stack trace", "stack trace"],
+    ["traceback (most recent call last)", "python traceback"],
+    ["uncaught exception", "uncaught exception"],
+    ["failed to load extension", "failed extension load"],
+    ["syntaxerror", "syntax error"],
+    ["typeerror", "type error"],
+  ];
+  const hardReason = hardFailures.find(([needle]) => lower.includes(needle))?.[1];
+  if (hardReason || text.length > 30_000) {
+    return { score: 100, reasons: [hardReason ?? "huge entry >30k chars"] };
+  }
 
   // Chroma context-rot lesson: length alone creates degradation; irrelevant/distracting text compounds it.
-  if (text.length > 8_000) score += 45;
-  else if (text.length > 4_000) score += 24;
-  else if (text.length > 1_500) score += 10;
+  if (text.length > 8_000) addRisk(45, "long entry >8k chars");
+  else if (text.length > 4_000) addRisk(24, "long entry >4k chars");
+  else if (text.length > 1_500) addRisk(10, "medium entry >1.5k chars");
 
   // Tool-result noise: useful short-term, usually not worth keeping raw deep in history.
   if (
@@ -640,7 +690,7 @@ function contextRotRiskScore(entry: unknown, text = safeStringify(entry), lower 
     lower.includes("cargo build") ||
     lower.includes("npm install") ||
     lower.includes("bun install")
-  ) score += 35;
+  ) addRisk(35, "raw tool/log/diff/install output");
 
   const signalHits = CONTEXT_SIGNAL_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
   const fillerHits = FILLER_WORDS.reduce((hits, word) => hits + countPhrase(clean, word), 0);
@@ -649,22 +699,27 @@ function contextRotRiskScore(entry: unknown, text = safeStringify(entry), lower 
   const repetitionRatio = repeatedWordRatio(words);
 
   // Good context is focused: goal/spec/decision/file/test/expected/actual/next. Lack of anchors raises risk.
-  if (words.length >= 35 && signalHits === 0) score += 18;
-  if (words.length >= 70 && signalHits <= 1) score += 12;
+  if (words.length >= 35 && signalHits === 0) addRisk(18, "no task anchors");
+  if (words.length >= 70 && signalHits <= 1) addRisk(12, "weak task-anchor density");
 
   // User prose can be context pressure when it is hedged, vague, or filler-heavy.
   if (userText) {
     const fillerDensity = fillerHits / Math.max(words.length, 1);
-    if (fillerHits >= 6 || fillerDensity >= 0.08) score += 28;
-    if (ambiguityHits >= 3) score += 14;
-    if (clean.includes("?") && signalHits === 0 && words.length > 70) score += 18;
+    if (fillerHits >= 6 || fillerDensity >= 0.08) addRisk(28, "filler-heavy user text");
+    if (ambiguityHits >= 3) addRisk(14, "ambiguous/hedged user text");
+    if (clean.includes("?") && signalHits === 0 && words.length > 70) addRisk(18, "long question without anchors");
   }
 
   // Research-inspired distractor/repetition risk: similar-looking or repeated material makes retrieval less reliable.
-  if (distractorHits > 0) score += 22;
-  if (repetitionRatio >= 0.28 && words.length >= 80) score += 20;
+  if (distractorHits > 0) addRisk(22, "distractor/side-note phrase");
+  if (repetitionRatio >= 0.28 && words.length >= 80) addRisk(20, "high repetition");
 
-  return score;
+  return { score, reasons };
+
+  function addRisk(points: number, reason: string) {
+    score += points;
+    reasons.push(reason);
+  }
 }
 
 function extractUserMessageText(entry: unknown) {
