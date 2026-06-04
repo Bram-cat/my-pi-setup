@@ -12,6 +12,7 @@ extensions/
                         type, extract, screenshots). Auto-connects on startup. `/agentyc` to status.
   agentmemory/          Cross-session memory tools backed by a local agentmemory server
   contextia/            Contextro/Contextia codebase indexing and semantic search tools
+  context-cat/          Animated context-window cat widget, heatmap, and handoff helper
   subagents/            Scout/researcher/reviewer/worker subagent orchestration
   code-improve/         /code-improve and /code-review commands — deep multi-axis code quality review
                         dispatching sub-agents (Architect, Reviewer, Minimalist, Security)
@@ -56,6 +57,25 @@ system so the LLM can call them directly.
 **Prerequisite:** `uv tool install agentyc` (or `pip install agentyc`)
 
 **Install dependencies:** `cd ~/.pi/agent/extensions/agentyc-mcp && bun install`
+
+## Context Cat
+
+This setup includes `context-cat`, an animated Pi widget that watches context usage,
+shows green/yellow/red heatmap cells for compact/noisy/bad context, and can start a
+lightly cleaned handoff session before the window gets too risky. The heatmap uses a research-informed
+feature set: clear intent, slots/constraints, evidence boundaries, output format, and
+verification anchors are good; length, ambiguity, distractors, repetition, missing slots,
+weak evidence rules, logs, diffs, errors, oversized entries, and filler-heavy user text become context pressure.
+
+![Context Cat preview](./extensions/context-cat/assets/context-cat-preview.png)
+
+```text
+/context-cat
+/context-cat-explain
+/context-cat-handoff
+```
+
+**Install dependencies:** `cd ~/.pi/agent/extensions/context-cat && bun install`
 
 ## Code quality commands
 
@@ -122,11 +142,11 @@ After installing, restart Pi or run:
 /reload
 ```
 
-The `design-polish` extension also has its own local package for Remotion-based video mode. If you want video rendering available after install, run:
+The `context-cat` and `design-polish` extensions have their own local packages. If you want their optional package dependencies available after install, run:
 
 ```bash
-cd ~/.pi/agent/extensions/design-polish
-bun install
+cd ~/.pi/agent/extensions/context-cat && bun install
+cd ~/.pi/agent/extensions/design-polish && bun install
 ```
 
 ## How Pi discovers these files
